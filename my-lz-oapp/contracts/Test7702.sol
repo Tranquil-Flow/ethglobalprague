@@ -31,7 +31,7 @@ contract Test7702 {
      */
     function pullTokens(address token, uint256 amount) external {
         require(amount > 0, "Amount must be greater than 0");
-        
+
         // Transfer tokens from the caller to this contract
         bool success = IERC20(token).transferFrom(msg.sender, address(this), amount);
         require(success, "Token transfer failed");

@@ -67,10 +67,6 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
         
         emit TokenSwapsInitiated(chainIds, totalChainsSelling);
 
-        // Calculate gas fee per chain
-        uint256 gasPerChain = msg.value / chainIds.length;
-        require(gasPerChain > 0, "Insufficient gas provided for cross-chain messages");
-
         // 1. Send bridging messages to other chains to sell tokens on that chain
         for (uint i = 0; i < chainIds.length; i++) {
             // Skip the current chain
@@ -89,7 +85,7 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
                     chainIds[i], 
                     payload, 
                     options, 
-                    MessagingFee(gasPerChain, 0), 
+                    MessagingFee(address(this).balance, 0), // TODO: change to be calculated and taken from user
                     payable(msg.sender)
                 );
             }

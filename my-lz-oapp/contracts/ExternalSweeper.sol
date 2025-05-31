@@ -149,11 +149,8 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
     /// @param amount The amount of ETH to bridge
     function bridgeETH(uint256 amount) internal {
         // Implementation will be added later
-        // This would call a bridging protocol to send ETH back to Arbitrum
+        // This would call a bridging protocol to send ETH back to OriginSweeper
 
-        // Leave some ETH in the contract for sendETHBridgeMessage call
-        //TODO: modify this to calculate how much gas will be needed for sendETHBridgeMessage call afterwards
-        //TODO: let Factory contract pull remaining ETH leftover after that
         emit ETHBridgeInitiated(amount);
     }
 
@@ -162,12 +159,12 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
         bytes memory payload = abi.encode(MessageType.ETH_BRIDGED, "");
         bytes memory options = buildOptions(defaultOptions());
         
-        // Send message back to main contract on Arbitrum
+        // Send message back to main contract on OriginSweeper
         _lzSend(
             mainChainId,
             payload,
             options,
-            MessagingFee(address(this).balance, 0),
+            MessagingFee(address(this).balance, 0), // TODO: change to be calculated and taken from user
             payable(address(this))
         );
         
