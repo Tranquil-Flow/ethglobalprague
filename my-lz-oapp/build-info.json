@@ -1,0 +1,78 @@
+{
+  "errors": [
+    {
+      "sourceLocation": {
+        "file": "contracts/MainContract.sol",
+        "start": -1,
+        "end": -1
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": "1878",
+      "message": "SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.",
+      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> contracts/MainContract.sol\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "contracts/SellContract.sol",
+        "start": -1,
+        "end": -1
+      },
+      "type": "Warning",
+      "component": "general",
+      "severity": "warning",
+      "errorCode": "1878",
+      "message": "SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.",
+      "formattedMessage": "Warning: SPDX license identifier not provided in source file. Before publishing, consider adding a comment containing \"SPDX-License-Identifier: <SPDX-License>\" to each source file. Use \"SPDX-License-Identifier: UNLICENSED\" for non-open-source code. Please see https://spdx.org for more information.\n--> contracts/SellContract.sol\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "contracts/MainContract.sol",
+        "start": 2849,
+        "end": 2861
+      },
+      "type": "DeclarationError",
+      "component": "general",
+      "severity": "error",
+      "errorCode": "7576",
+      "message": "Undeclared identifier.",
+      "formattedMessage": "DeclarationError: Undeclared identifier.\n  --> contracts/MainContract.sol:59:40:\n   |\n59 |                 bytes memory options = buildOptions(defaultOptions());\n   |                                        ^^^^^^^^^^^^\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "contracts/MainContract.sol",
+        "start": 2862,
+        "end": 2876
+      },
+      "type": "DeclarationError",
+      "component": "general",
+      "severity": "error",
+      "errorCode": "7576",
+      "message": "Undeclared identifier.",
+      "formattedMessage": "DeclarationError: Undeclared identifier.\n  --> contracts/MainContract.sol:59:53:\n   |\n59 |                 bytes memory options = buildOptions(defaultOptions());\n   |                                                     ^^^^^^^^^^^^^^\n\n"
+    },
+    {
+      "sourceLocation": {
+        "file": "contracts/MainContract.sol",
+        "start": 6473,
+        "end": 6483
+      },
+      "type": "DeclarationError",
+      "component": "general",
+      "severity": "error",
+      "errorCode": "7576",
+      "message": "Undeclared identifier. \"receiveETH\" is not (or not yet) visible at this point.",
+      "formattedMessage": "DeclarationError: Undeclared identifier. \"receiveETH\" is not (or not yet) visible at this point.\n   --> contracts/MainContract.sol:154:13:\n    |\n154 |             receiveETH();\n    |             ^^^^^^^^^^\n\n"
+    }
+  ],
+  "sources": {},
+  "contracts": {},
+  "build_infos": [
+    {
+      "id": "63d2efb2dfc40463e351e30858797180",
+      "source_id_to_path": {},
+      "language": "Solidity"
+    }
+  ]
+}
