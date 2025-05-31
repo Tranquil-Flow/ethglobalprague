@@ -6,10 +6,19 @@ import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSen
 import { OAppOptionsType3 } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-// Selling contract to be deployed on Optimism
-contract SellingContract is OApp, OAppOptionsType3 {
+/**
+ * @title ExternalSweeper
+ * @dev Contract that sweeps all tokens of a user on this chain, and bridges ETH back to the origin chain contract.
+ */
+contract ExternalSweeper is OApp, OAppOptionsType3 {
     address public mainContract;
     uint32 public mainChainId;
+
+    // Events
+    event SwapRequestReceived(uint256 numSwaps);
+    event TokenSwapped(address token, uint256 amount, uint256 ethReceived);
+    event ETHBridgeInitiated(uint256 amount);
+    event MessageSentToMain();
 
     constructor(
         address _endpoint,
@@ -17,6 +26,9 @@ contract SellingContract is OApp, OAppOptionsType3 {
         address _mainContract,
         uint32 _mainChainId
     ) OApp(_endpoint, _delegate) Ownable(_delegate) {
+        require(_mainContract != address(0), "Invalid main contract address");
+        require(_mainChainId != 0, "Invalid main chain ID");
+        
         mainContract = _mainContract;
         mainChainId = _mainChainId;
     }
@@ -44,6 +56,9 @@ contract SellingContract is OApp, OAppOptionsType3 {
         address /*_executor*/,
         bytes calldata /*_extraData*/
     ) internal override {
+        // Verify the sender is from the main chain
+        require(_origin.srcEid == mainChainId, "Message not from main chain");
+        
         // Decode the message type and payload
         (MessageType messageType, bytes memory messageData) = abi.decode(payload, (MessageType, bytes));
         
@@ -51,19 +66,36 @@ contract SellingContract is OApp, OAppOptionsType3 {
             // Properly decode the SwapInfo array
             SwapInfo[] memory swapInfos = abi.decode(abi.decode(messageData, (bytes)), (SwapInfo[]));
             
+            // Verify we have swaps to perform
+            require(swapInfos.length > 0, "No swap information provided");
+            
+            emit SwapRequestReceived(swapInfos.length);
+            
+            uint256 ethBalanceBefore = address(this).balance;
+            
             // Perform token swaps
             for (uint i = 0; i < swapInfos.length; i++) {
                 SwapInfo memory info = swapInfos[i];
-                swapToken(
+                
+                // Validate swap info
+                require(info.dexContract != address(0), "Invalid DEX contract");
+                require(info.token != address(0), "Invalid token address");
+                require(info.amount > 0, "Amount must be greater than 0");
+                
+                uint256 ethReceived = swapToken(
                     info.dexContract,
                     info.token,
                     info.amount,
                     info.dexCalldata
                 );
+                
+                emit TokenSwapped(info.token, info.amount, ethReceived);
             }
             
+            uint256 totalEthReceived = address(this).balance - ethBalanceBefore;
+            
             // Bridge ETH back to the main contract
-            bridgeETH();
+            bridgeETH(totalEthReceived);
             
             // Send message back to main contract that ETH is on the way
             sendETHBridgedMessage();
@@ -90,19 +122,39 @@ contract SellingContract is OApp, OAppOptionsType3 {
         IERC20(token).approve(dexContract, amount);
         
         // 3. Call the DEX contract with the provided calldata
-        (bool success, ) = dexContract.call(dexCalldata);
-        require(success, "DEX swap failed");
+        (bool success, bytes memory returnData) = dexContract.call(dexCalldata);
+        
+        // Check if the call was successful
+        if (!success) {
+            // Extract error message if available
+            if (returnData.length > 0) {
+                // solhint-disable-next-line no-inline-assembly
+                assembly {
+                    let returnDataSize := mload(returnData)
+                    revert(add(32, returnData), returnDataSize)
+                }
+            } else {
+                revert("DEX swap failed without message");
+            }
+        }
         
         // 4. Calculate the amount of ETH received
         amountReceived = address(this).balance - ethBalanceBefore;
+        require(amountReceived > 0, "No ETH received from swap");
         
         return amountReceived;
     }
 
     /// @notice Bridge ETH received from selling tokens to the main contract
-    function bridgeETH() internal {
+    /// @param amount The amount of ETH to bridge
+    function bridgeETH(uint256 amount) internal {
         // Implementation will be added later
         // This would call a bridging protocol to send ETH back to Arbitrum
+
+        // Leave some ETH in the contract for sendETHBridgeMessage call
+        //TODO: modify this to calculate how much gas will be needed for sendETHBridgeMessage call afterwards
+        //TODO: let Factory contract pull remaining ETH leftover after that
+        emit ETHBridgeInitiated(amount);
     }
 
     /// @notice Send a message back to main contract indicating ETH has been bridged
@@ -115,8 +167,10 @@ contract SellingContract is OApp, OAppOptionsType3 {
             mainChainId,
             payload,
             options,
-            MessagingFee(address(this).balance / 10, 0), // Use some ETH for gas
+            MessagingFee(address(this).balance, 0),
             payable(address(this))
         );
+        
+        emit MessageSentToMain();
     }
 }

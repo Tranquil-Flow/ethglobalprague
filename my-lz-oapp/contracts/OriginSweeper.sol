@@ -6,22 +6,31 @@ import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSen
 import { OAppOptionsType3 } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract MainContract is OApp, OAppOptionsType3 {
-    constructor(address _endpoint, address _delegate) OApp(_endpoint, _delegate) Ownable(_delegate) {}
-
-    string public data = "Nothing received yet.";
-
-    /* @dev For MVP deployment:
-        - Main contract is on Arbitrum, where users will first interact with the system
-        - User sends information about all tokens to be sold, this info is bridged to selling contracts on other chains
-        - ETH is received back from other chains, and is shielded with Railgun if privacy is enabled
-    */
+/**
+ * @title OriginSweeper
+ * @author Tranquil-Flow
+ * @dev A contract that sells all tokens on the origin chain, and coordinates selling tokens on external chains.
+        All tokens are consolidated into ETH on this contract, and then transferred to one address.
+ */
+contract OriginSweeper is OApp, OAppOptionsType3 {
+    constructor(
+        address _endpoint, 
+        address _delegate,
+        address _finalReceiverAddress,
+        uint totalChainsSelling
+    ) OApp(_endpoint, _delegate) Ownable(_delegate) {
+        finalReceiverAddress = _finalReceiverAddress;
+        totalChainsSelling = _totalChainsSelling;
+    }
 
     // Counter that tracks the amount of chains that we expect to receive ETH from
     uint public totalChainsSelling;
 
     // Counter that tracks the amount of chains that have sent ETH to this contract
     uint public totalChainsSentETH;
+
+    // Address to send ETH to if privacy is not enabled
+    address public finalReceiverAddress;
 
     // Struct to define swap information for a token
     struct SwapInfo {
@@ -33,6 +42,11 @@ contract MainContract is OApp, OAppOptionsType3 {
 
     // Message types for cross-chain communication
     enum MessageType { SWAP_REQUEST, ETH_BRIDGED }
+
+    // Events
+    event TokenSwapsInitiated(uint32[] chainIds, uint totalChains);
+    event ETHReceived(uint chainsSentSoFar, uint totalExpected);
+    event PrivacyShieldingInitiated(uint totalETH);
 
     /**
      * @notice Execute token swaps across multiple chains
@@ -46,32 +60,61 @@ contract MainContract is OApp, OAppOptionsType3 {
         bool privacy
     ) external payable {
         require(chainIds.length == swapInfoArrays.length, "Chain IDs and swap info arrays length mismatch");
+        require(chainIds.length > 0, "No chains specified for swaps");
         
         totalChainsSelling = chainIds.length;
         totalChainsSentETH = 0;
+        
+        emit TokenSwapsInitiated(chainIds, totalChainsSelling);
+
+        // Calculate gas fee per chain
+        uint256 gasPerChain = msg.value / chainIds.length;
+        require(gasPerChain > 0, "Insufficient gas provided for cross-chain messages");
 
         // 1. Send bridging messages to other chains to sell tokens on that chain
         for (uint i = 0; i < chainIds.length; i++) {
-            // Skip the current chain (Arbitrum)
+            // Skip the current chain
             if (chainIds[i] != block.chainid) {
-                // Properly encode the SwapInfo array directly without nesting
+                // Verify the swapInfos array for this chain is not empty
+                require(swapInfoArrays[i].length > 0, "Empty swap info array for chain");
+                
+                // Encode the SwapInfo array for this chain
                 bytes memory payload = abi.encode(MessageType.SWAP_REQUEST, abi.encode(swapInfoArrays[i]));
+                
+                // Build options with default settings
                 bytes memory options = buildOptions(defaultOptions());
-                _lzSend(chainIds[i], payload, options, MessagingFee(msg.value / chainIds.length, 0), payable(msg.sender));
+                
+                // Send message to the chain
+                _lzSend(
+                    chainIds[i], 
+                    payload, 
+                    options, 
+                    MessagingFee(gasPerChain, 0), 
+                    payable(msg.sender)
+                );
             }
         }
 
-        // 2. Sell tokens on this chain (Arbitrum)
+        // 2. Sell tokens on this chain if specified
         SwapInfo[] memory localSwaps;
+        bool localChainIncluded = false;
+        
         for (uint i = 0; i < chainIds.length; i++) {
             if (chainIds[i] == block.chainid) {
                 localSwaps = swapInfoArrays[i];
+                localChainIncluded = true;
                 break;
             }
         }
 
-        if (localSwaps.length > 0) {
+        if (localChainIncluded && localSwaps.length > 0) {
+            uint256 ethBalanceBefore = address(this).balance;
+            
             for (uint i = 0; i < localSwaps.length; i++) {
+                // Verify token address and amount
+                require(localSwaps[i].token != address(0), "Invalid token address");
+                require(localSwaps[i].amount > 0, "Token amount must be greater than 0");
+                
                 swapToken(
                     localSwaps[i].dexContract, 
                     localSwaps[i].token, 
@@ -83,6 +126,8 @@ contract MainContract is OApp, OAppOptionsType3 {
             // Count local chain as completed
             totalChainsSentETH++;
             
+            emit ETHReceived(totalChainsSentETH, totalChainsSelling);
+            
             // Check if all chains have completed (rare case where only local chain had tokens)
             if (totalChainsSentETH == totalChainsSelling && privacy) {
                 shieldETH();
@@ -93,10 +138,17 @@ contract MainContract is OApp, OAppOptionsType3 {
     /// @notice Receives ETH from a selling contract on a different chain
     function receiveETH() external {
         totalChainsSentETH++;
+        
+        emit ETHReceived(totalChainsSentETH, totalChainsSelling);
 
         if (totalChainsSentETH == totalChainsSelling) {
-            // 3. If all chains have sent ETH, shield the ETH
-            shieldETH();
+            // 3. If all chains have sent ETH, shield the ETH if privacy is enabled
+            if (privacy) {
+                shieldETH();
+            } else {
+                // If privacy is not enabled, send ETH to a specified address
+                payable(msg.sender).transfer(finalReceiverAddress);
+            }
         }
     }
 
@@ -120,18 +172,20 @@ contract MainContract is OApp, OAppOptionsType3 {
         IERC20(token).approve(dexContract, amount);
         
         // 3. Call the DEX contract with the provided calldata
-        (bool success, ) = dexContract.call(dexCalldata);
-        require(success, "DEX swap failed");
+        (bool success, bytes memory returnData) = dexContract.call(dexCalldata);
         
         // 4. Calculate the amount of ETH received
         amountReceived = address(this).balance - ethBalanceBefore;
+        require(amountReceived > 0, "No ETH received from swap");
         
         return amountReceived;
     }
 
-    /// @notice Shield received ETH with Railgun
+    /// @notice Shield received ETH with Railgun TODO
     function shieldETH() internal {
         // Implementation will be added later
+        uint256 totalETH = address(this).balance;
+        emit PrivacyShieldingInitiated(totalETH);
     }
 
     /**
@@ -152,9 +206,6 @@ contract MainContract is OApp, OAppOptionsType3 {
         if (messageType == MessageType.ETH_BRIDGED) {
             // Handle ETH bridged notification from another chain
             receiveETH();
-        } else {
-            // For other message types (like string messages from the original example)
-            data = abi.decode(messageData, (string));
         }
     }
 }
