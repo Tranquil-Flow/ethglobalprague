@@ -9,6 +9,7 @@ import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSen
 import "../contracts/OriginSweeper.sol";
 import "../contracts/ExternalSweeper.sol";
 import "../contracts/TestToken.sol";
+import "../contracts/UniswapV4Helper.sol";
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -64,6 +65,7 @@ interface IPermit2 {
 
 contract SweeperTest is TestHelperOz5 {
     using OptionsBuilder for bytes;
+    using UniswapV4Helper for *;
 
     // Chain IDs for LayerZero
     uint32 constant CHAIN_ID_OPTIMISM = 111;   // Optimism
@@ -183,7 +185,12 @@ contract SweeperTest is TestHelperOz5 {
         IWETH(weth).deposit{value: ethAmount}();
         
         // For V4, we would need to approve Permit2 and then use Universal Router
-        IERC20(weth).approve(getPermit2Address(fork), type(uint256).max);
+        UniswapV4Helper.approveTokensForV4(
+            weth,
+            getPermit2Address(fork),
+            router,
+            ethAmount
+        );
         
         // Create V4 swap through Universal Router
         createV4SwapForETH(router, weth, usdc, ethAmount);
@@ -205,58 +212,13 @@ contract SweeperTest is TestHelperOz5 {
     }
 
     function createSwapInfo(address token, uint256 amount, address dexRouter) internal view returns (OriginSweeper.SwapInfo memory) {
-        // Create Uniswap V4 swap using Universal Router
-        // Build the PoolKey for the USDC/ETH pool
-        IPoolManager.PoolKey memory poolKey = IPoolManager.PoolKey({
-            currency0: token < address(0) ? token : address(0), // Lower address first
-            currency1: token < address(0) ? address(0) : token, // Higher address second
-            fee: 3000, // 0.3% fee tier
-            tickSpacing: 60, // Standard tick spacing for 0.3% pools
-            hooks: address(0) // No hooks for standard pools
-        });
-
-        // Encode the Universal Router command
-        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
-
-        // Encode V4Router actions
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
-            uint8(Actions.TAKE_ALL)
+        // Use the V4 helper library to create swap info
+        return UniswapV4Helper.createV4SwapInfo(
+            token,
+            amount,
+            dexRouter,
+            3000 // 0.3% fee tier
         );
-
-        // Prepare parameters for each action
-        bytes[] memory params = new bytes[](3);
-        params[0] = abi.encode(
-            IV4Router.ExactInputSingleParams({
-                poolKey: poolKey,
-                zeroForOne: token < address(0), // true if swapping currency0 for currency1
-                amountIn: uint128(amount),
-                amountOutMinimum: 0, // No slippage protection for testing
-                hookData: bytes("")
-            })
-        );
-        params[1] = abi.encode(poolKey.currency0, amount);
-        params[2] = abi.encode(poolKey.currency1, uint256(0)); // minimum amount out
-
-        // Combine actions and params into inputs
-        bytes[] memory inputs = new bytes[](1);
-        inputs[0] = abi.encode(actions, params);
-
-        // Create the final calldata for Universal Router
-        bytes memory dexCalldata = abi.encodeWithSelector(
-            IUniversalRouter.execute.selector,
-            commands,
-            inputs,
-            block.timestamp + 1 hours // deadline
-        );
-
-        return OriginSweeper.SwapInfo({
-            dexContract: dexRouter,
-            token: token,
-            amount: amount,
-            dexCalldata: dexCalldata
-        });
     }
 
     function test_fullTokenSweepFlow() public {
@@ -267,8 +229,13 @@ contract SweeperTest is TestHelperOz5 {
         
         vm.startPrank(user);
         IERC20(USDC_OPTIMISM).approve(address(originSweeper), 500 * 10**6);
-        // Also approve Permit2 for V4 interactions
-        IERC20(USDC_OPTIMISM).approve(PERMIT2_OPTIMISM, type(uint256).max);
+        // Approve for V4 interactions using the helper
+        UniswapV4Helper.approveTokensForV4(
+            USDC_OPTIMISM,
+            PERMIT2_OPTIMISM,
+            UNIVERSAL_ROUTER_OPTIMISM,
+            500 * 10**6
+        );
         vm.stopPrank();
         
         // Check USDC balance
@@ -280,7 +247,12 @@ contract SweeperTest is TestHelperOz5 {
         
         vm.startPrank(user);
         IERC20(USDC_BASE).approve(address(baseSweeper), 500 * 10**6);
-        IERC20(USDC_BASE).approve(PERMIT2_BASE, type(uint256).max);
+        UniswapV4Helper.approveTokensForV4(
+            USDC_BASE,
+            PERMIT2_BASE,
+            UNIVERSAL_ROUTER_BASE,
+            500 * 10**6
+        );
         vm.stopPrank();
         
         uint256 usdcBalanceBase = IERC20(USDC_BASE).balanceOf(user);
@@ -333,6 +305,36 @@ contract SweeperTest is TestHelperOz5 {
         
         console.log("Final receiver balance:", finalReceiverBalance);
         console.log("Uniswap V4 test completed successfully");
+    }
+
+    function test_v4SwapCalldataCreation() public {
+        console.log("Testing V4 swap calldata creation");
+        
+        // Test creating swap calldata using the helper
+        bytes memory calldata_ = UniswapV4Helper.createV4SwapCalldata(
+            USDC_OPTIMISM,
+            1000 * 10**6, // 1000 USDC
+            0, // No minimum amount out
+            3000 // 0.3% fee
+        );
+        
+        assertTrue(calldata_.length > 0, "Calldata should not be empty");
+        console.log("Generated calldata length:", calldata_.length);
+        
+        // Test creating SwapInfo
+        UniswapV4Helper.SwapInfo memory swapInfo = UniswapV4Helper.createV4SwapInfo(
+            USDC_OPTIMISM,
+            1000 * 10**6,
+            UNIVERSAL_ROUTER_OPTIMISM,
+            3000
+        );
+        
+        assertEq(swapInfo.token, USDC_OPTIMISM, "Token address should match");
+        assertEq(swapInfo.amount, 1000 * 10**6, "Amount should match");
+        assertEq(swapInfo.dexContract, UNIVERSAL_ROUTER_OPTIMISM, "DEX contract should match");
+        assertTrue(swapInfo.dexCalldata.length > 0, "DEX calldata should not be empty");
+        
+        console.log("V4 swap calldata creation test passed");
     }
 }
 
