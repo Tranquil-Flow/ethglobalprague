@@ -1,3 +1,6 @@
 [submodule "my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/devtools"]
 	path = my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/devtools
 	url = https://github.com/LayerZero-Labs/devtools
+[submodule "my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/v4-core"]
+	path = my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/v4-core
+	url = https://github.com/uniswap/v4-core
