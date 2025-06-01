@@ -1,0 +1,3 @@
+[submodule "my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/devtools"]
+	path = my-lz-oapp/node_modules/@layerzerolabs/toolbox-foundry/lib/devtools
+	url = https://github.com/LayerZero-Labs/devtools
