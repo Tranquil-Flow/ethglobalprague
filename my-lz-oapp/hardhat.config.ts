@@ -67,14 +67,29 @@ const config: HardhatUserConfig = {
         //     url: process.env.RPC_URL_ARB_SEPOLIA || 'https://arbitrum-sepolia.gateway.tenderly.co',
         //     accounts,
         // },
-        sepolia: {
-            eid: EndpointId.SEPOLIA_V2_TESTNET,
-            url: process.env.RPC_URL_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
+        // sepolia: {
+        //     eid: EndpointId.SEPOLIA_V2_TESTNET,
+        //     url: process.env.RPC_URL_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
+        //     accounts,
+        // },
+        // monadTestnet: {
+        //     eid: EndpointId.MONAD_V2_TESTNET,
+        //     url: process.env.RPC_URL_MONAD_TESTNET || 'https://testnet-rpc.monad.xyz',
+        //     accounts,
+        // },
+        optimism: {
+            eid: EndpointId.OPTIMISM_V2_TESTNET,
+            url: process.env.OPTIMISM_RPC_URL || 'https://optimism-mainnet.infura.io/v3/5988071a0489487a9507da0ba450cc23',
             accounts,
         },
-        monadTestnet: {
-            eid: EndpointId.MONAD_V2_TESTNET,
-            url: process.env.RPC_URL_MONAD_TESTNET || 'https://testnet-rpc.monad.xyz',
+        base: {
+            eid: EndpointId.BASE_V2_TESTNET,
+            url: process.env.BASE_RPC_URL || 'https://base-mainnet.infura.io/v3/5988071a0489487a9507da0ba450cc23',
+            accounts,
+        },
+        unichain: {
+            eid: EndpointId.UNICHAIN_V2_TESTNET,
+            url: process.env.UNICHAIN_RPC_URL || 'https://unichain-mainnet.infura.io/v3/5988071a0489487a9507da0ba450cc23',
             accounts,
         },
         hardhat: {

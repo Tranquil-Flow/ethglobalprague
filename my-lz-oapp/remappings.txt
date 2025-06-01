@@ -4,5 +4,5 @@
 @uniswap/v4-periphery/=node_modules/@layerzerolabs/toolbox-foundry/lib/v4-periphery/src/
 @uniswap/permit2/=node_modules/@layerzerolabs/toolbox-foundry/lib/permit2/src/
 @uniswap/universal-router/=node_modules/@layerzerolabs/toolbox-foundry/lib/universal-router/contracts/
-forge-std/=node_modules/@layerzerolabs/toolbox-foundry/lib/permit2/lib/forge-std/src/
-@layerzerolabs/test-devtools-evm-foundry/=lib/devtools/packages/test-devtools-evm-foundry
+forge-std/=node_modules/@layerzerolabs/toolbox-foundry/lib/forge-std/src/
+@layerzerolabs/test-devtools-evm-foundry/=node_modules/@layerzerolabs/toolbox-foundry/lib/devtools/packages/test-devtools-evm-foundry
