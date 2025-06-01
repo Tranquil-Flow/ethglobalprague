@@ -4,6 +4,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { OApp, MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import { OAppOptionsType3 } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
+import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
@@ -11,6 +12,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @dev Contract that sweeps all tokens of a user on this chain, and bridges ETH back to the origin chain contract.
  */
 contract ExternalSweeper is OApp, OAppOptionsType3 {
+    using OptionsBuilder for bytes;
+
     address public mainContract;
     uint32 public mainChainId;
 
@@ -33,7 +36,7 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
         mainChainId = _mainChainId;
     }
 
-    // Define the swap info struct matching MainContract
+    // Define the swap info struct matching OriginSweeper
     struct SwapInfo {
         address dexContract;       // The DEX contract to interact with
         address token;             // The token to be swapped
@@ -102,7 +105,7 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
         }
     }
 
-    /// @notice Swaps a specified amount of a token for the other token in the pair at a specified dex contract
+    /// @notice Swaps a specified amount of a token for ETH at a specified dex contract
     /// @dev Uses a generalized approach to interact with any DEX contract using custom calldata
     /// @param dexContract The address of the DEX contract
     /// @param token The address of the token to swap
@@ -138,7 +141,10 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
             }
         }
         
-        // 4. Calculate the amount of ETH received
+        // 4. Unwrap the WETH to ETH
+        
+
+        // 5. Calculate the amount of ETH received
         amountReceived = address(this).balance - ethBalanceBefore;
         require(amountReceived > 0, "No ETH received from swap");
         
@@ -157,7 +163,7 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
     /// @notice Send a message back to main contract indicating ETH has been bridged
     function sendETHBridgedMessage() internal {
         bytes memory payload = abi.encode(MessageType.ETH_BRIDGED, "");
-        bytes memory options = buildOptions(defaultOptions());
+        bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
         
         // Send message back to main contract on OriginSweeper
         _lzSend(
@@ -169,5 +175,29 @@ contract ExternalSweeper is OApp, OAppOptionsType3 {
         );
         
         emit MessageSentToMain();
+    }
+
+    /**
+     * @dev Helper function to get default LayerZero options
+     */
+    function getDefaultOptions() public pure returns (bytes memory) {
+        return OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
+    }
+
+    /**
+     * @dev Test function to execute swapToken externally (for testing only)
+     * @param dexContract The address of the DEX contract
+     * @param token The address of the token to swap
+     * @param amount The amount of tokens to swap
+     * @param dexCalldata The encoded calldata for the DEX interaction
+     * @return amountReceived The amount of ETH received from the swap
+     */
+    function testSwapToken(
+        address dexContract,
+        address token,
+        uint256 amount,
+        bytes memory dexCalldata
+    ) external onlyOwner returns (uint256 amountReceived) {
+        return swapToken(dexContract, token, amount, dexCalldata);
     }
 }

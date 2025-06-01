@@ -20,12 +20,7 @@ contract DeployForkTestScript is Script {
     // USDC addresses on each chain
     address constant USDC_OPTIMISM = 0x7F5c764cBc14f9669B88837ca1490cCa17c31607;  // USDC on Optimism
     address constant USDC_BASE = 0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA;       // USDC on Base
-    address constant USDC_UNICHAIN = 0x7F5c764cBc14f9669B88837ca1490cCa17c31607;   // Placeholder - adjust
-    
-    // Uniswap routers on each chain
-    address constant UNISWAP_OPTIMISM = 0xE592427A0AEce92De3Edee1F18E0157C05861564;  // Optimism Uniswap
-    address constant UNISWAP_BASE = 0x327Df1E6de05895d2ab08513aaDD9313Fe505d86;       // Base Uniswap
-    address constant UNISWAP_UNICHAIN = 0xE592427A0AEce92De3Edee1F18E0157C05861564;   // Placeholder - adjust
+    address constant USDC_UNICHAIN = 0x078D782b760474a361dDA0AF3839290b0EF57AD6;   // USDC on Unichain
     
     // Addresses for deployed contracts
     address public originSweeper;
@@ -68,14 +63,14 @@ contract DeployForkTestScript is Script {
             // You would need to know the address of OriginSweeper on Optimism
             address knownOriginSweeper = 0x0000000000000000000000000000000000000000; // Replace with actual address
             
-            ExternalSweeper external = new ExternalSweeper(
+            ExternalSweeper externalSweeper = new ExternalSweeper(
                 ENDPOINT_BASE,
                 deployer,
                 knownOriginSweeper,
                 CHAIN_ID_OPTIMISM
             );
             
-            baseExternalSweeper = address(external);
+            baseExternalSweeper = address(externalSweeper);
             console.log("ExternalSweeper deployed on Base at:", baseExternalSweeper);
             
         } else if (block.chainid == 130) { // Unichain (replace with actual chainId)
@@ -84,14 +79,14 @@ contract DeployForkTestScript is Script {
             // You would need to know the address of OriginSweeper on Optimism
             address knownOriginSweeper = 0x0000000000000000000000000000000000000000; // Replace with actual address
             
-            ExternalSweeper external = new ExternalSweeper(
+            ExternalSweeper externalSweeper = new ExternalSweeper(
                 ENDPOINT_UNICHAIN,
                 deployer,
                 knownOriginSweeper,
                 CHAIN_ID_OPTIMISM
             );
             
-            unichainExternalSweeper = address(external);
+            unichainExternalSweeper = address(externalSweeper);
             console.log("ExternalSweeper deployed on Unichain at:", unichainExternalSweeper);
         } else {
             revert("Unsupported chain");

@@ -5,188 +5,247 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title UniswapV4Helper
- * @dev Helper contract for creating Uniswap V4 swap calldata using Universal Router
+ * @dev Helper library for creating Uniswap V4 swap calldata and structures
  */
 library UniswapV4Helper {
-    // Commands for Universal Router
-    uint256 constant V4_SWAP = 0x00;
-    
-    // Actions for V4 Router
-    uint256 constant SWAP_EXACT_IN_SINGLE = 0x00;
-    uint256 constant SETTLE_ALL = 0x01;
-    uint256 constant TAKE_ALL = 0x02;
+    // Deployment addresses for V4 contracts (from https://docs.uniswap.org/contracts/v4/deployments)
+    address constant POOL_MANAGER_ETHEREUM = 0x000000000004444c5dc75cB358380D2e3dE08A90;
+    address constant POOL_MANAGER_OPTIMISM = 0x9a13F98Cb987694C9F086b1F5eB990EeA8264Ec3;
+    address constant POOL_MANAGER_BASE = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
+    address constant POOL_MANAGER_UNICHAIN = 0x1F98400000000000000000000000000000000004;
+    address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
-    // Universal Router interface
-    interface IUniversalRouter {
-        function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable;
+    // WETH addresses per chain
+    address constant WETH_OPTIMISM = 0x4200000000000000000000000000000000000006;
+    address constant WETH_BASE = 0x4200000000000000000000000000000000000006;
+    address constant WETH_UNICHAIN = 0x4200000000000000000000000000000000000006;
+
+    // Universal Router addresses per chain (from official V4 deployments)
+    address constant UNIVERSAL_ROUTER_ETHEREUM = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
+    address constant UNIVERSAL_ROUTER_OPTIMISM = 0x851116D9223fabED8E56C0E6b8Ad0c31d98B3507;
+    address constant UNIVERSAL_ROUTER_BASE = 0x6fF5693b99212Da76ad316178A184AB56D299b43;
+    address constant UNIVERSAL_ROUTER_UNICHAIN = 0xEf740bf23aCaE26f6492B10de645D6B98dC8Eaf3;
+
+    // Universal Router Commands (from @uniswap/universal-router)
+    uint8 constant V4_SWAP = 0x00;
+    uint8 constant PERMIT2_TRANSFER_FROM = 0x01;
+    uint8 constant WRAP_ETH = 0x0b;
+    uint8 constant UNWRAP_WETH = 0x0c;
+
+    // V4Router Actions (from @uniswap/v4-periphery)
+    uint8 constant SWAP_EXACT_IN_SINGLE = 0x00;
+    uint8 constant SETTLE_ALL = 0x12;
+    uint8 constant TAKE_ALL = 0x13;
+
+    struct SwapInfo {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        uint256 minAmountOut;
+        uint24 fee;
+        address recipient;
+        address dexRouter;
     }
 
-    // V4 PoolManager interface
-    interface IPoolManager {
-        struct PoolKey {
-            address currency0;
-            address currency1; 
-            uint24 fee;
-            int24 tickSpacing;
-            address hooks;
-        }
+    // PoolKey structure for V4
+    struct PoolKey {
+        address currency0;
+        address currency1;
+        uint24 fee;
+        int24 tickSpacing;
+        address hooks;
     }
 
-    // V4 Router interface
-    interface IV4Router {
-        struct ExactInputSingleParams {
-            IPoolManager.PoolKey poolKey;
-            bool zeroForOne;
-            uint128 amountIn;
-            uint128 amountOutMinimum;
-            bytes hookData;
-        }
-    }
-
-    // Permit2 interface
-    interface IPermit2 {
-        function approve(address token, address spender, uint160 amount, uint48 expiration) external;
-    }
-
-    /**
-     * @dev Creates calldata for swapping tokens to ETH using Uniswap V4 Universal Router
-     * @param tokenIn Address of the input token
-     * @param amountIn Amount of input tokens to swap
-     * @param amountOutMinimum Minimum amount of ETH to receive
-     * @param fee The pool fee tier (e.g., 3000 for 0.3%)
-     * @return calldata for Universal Router execute function
-     */
-    function createV4SwapCalldata(
-        address tokenIn,
-        uint256 amountIn,
-        uint256 amountOutMinimum,
-        uint24 fee
-    ) internal view returns (bytes memory) {
-        // Create PoolKey for the token/ETH pool
-        // For V4, ETH is represented as address(0)
-        IPoolManager.PoolKey memory poolKey = IPoolManager.PoolKey({
-            currency0: tokenIn < address(0) ? tokenIn : address(0), // Lower address first
-            currency1: tokenIn < address(0) ? address(0) : tokenIn, // Higher address second
-            fee: fee,
-            tickSpacing: getTickSpacingForFee(fee),
-            hooks: address(0) // No hooks for standard pools
-        });
-
-        // Encode the Universal Router command
-        bytes memory commands = abi.encodePacked(uint8(V4_SWAP));
-
-        // Encode V4Router actions
-        bytes memory actions = abi.encodePacked(
-            uint8(SWAP_EXACT_IN_SINGLE),
-            uint8(SETTLE_ALL),
-            uint8(TAKE_ALL)
-        );
-
-        // Prepare parameters for each action
-        bytes[] memory params = new bytes[](3);
-        
-        // Action 1: Swap parameters
-        params[0] = abi.encode(
-            IV4Router.ExactInputSingleParams({
-                poolKey: poolKey,
-                zeroForOne: tokenIn < address(0), // true if swapping currency0 for currency1
-                amountIn: uint128(amountIn),
-                amountOutMinimum: uint128(amountOutMinimum),
-                hookData: bytes("")
-            })
-        );
-        
-        // Action 2: Settle input token
-        params[1] = abi.encode(poolKey.currency0, amountIn);
-        
-        // Action 3: Take output token (ETH)
-        params[2] = abi.encode(poolKey.currency1, amountOutMinimum);
-
-        // Combine actions and params into inputs
-        bytes[] memory inputs = new bytes[](1);
-        inputs[0] = abi.encode(actions, params);
-
-        // Create the final calldata for Universal Router
-        return abi.encodeWithSelector(
-            IUniversalRouter.execute.selector,
-            commands,
-            inputs,
-            block.timestamp + 1 hours // deadline
-        );
+    // ExactInputSingleParams for V4Router
+    struct ExactInputSingleParams {
+        PoolKey poolKey;
+        bool zeroForOne;
+        uint128 amountIn;
+        uint128 amountOutMinimum;
+        bytes hookData;
     }
 
     /**
-     * @dev Gets the appropriate tick spacing for a given fee tier
-     * @param fee The pool fee
-     * @return tickSpacing The tick spacing for the fee tier
+     * @dev Get Universal Router address for current chain
      */
-    function getTickSpacingForFee(uint24 fee) internal pure returns (int24 tickSpacing) {
-        if (fee == 100) return 1;        // 0.01%
-        if (fee == 500) return 10;       // 0.05%
-        if (fee == 3000) return 60;      // 0.3%
-        if (fee == 10000) return 200;    // 1%
+    function getUniversalRouterAddress() internal view returns (address) {
+        uint256 chainId = block.chainid;
+        if (chainId == 1) return UNIVERSAL_ROUTER_ETHEREUM;    // Ethereum
+        if (chainId == 10) return UNIVERSAL_ROUTER_OPTIMISM;   // Optimism
+        if (chainId == 8453) return UNIVERSAL_ROUTER_BASE;     // Base
+        if (chainId == 1301) return UNIVERSAL_ROUTER_UNICHAIN; // Unichain
+        revert("Unsupported chain for Universal Router");
+    }
+
+    /**
+     * @dev Get PoolManager address for current chain
+     */
+    function getPoolManagerAddress() internal view returns (address) {
+        uint256 chainId = block.chainid;
+        if (chainId == 1) return POOL_MANAGER_ETHEREUM;    // Ethereum
+        if (chainId == 10) return POOL_MANAGER_OPTIMISM;   // Optimism
+        if (chainId == 8453) return POOL_MANAGER_BASE;     // Base
+        if (chainId == 1301) return POOL_MANAGER_UNICHAIN; // Unichain
+        revert("Unsupported chain for PoolManager");
+    }
+
+    /**
+     * @dev Get WETH address for current chain
+     */
+    function getWETHAddress() internal view returns (address) {
+        uint256 chainId = block.chainid;
+        if (chainId == 10) return WETH_OPTIMISM;     // Optimism
+        if (chainId == 8453) return WETH_BASE;       // Base
+        if (chainId == 1301) return WETH_UNICHAIN;   // Unichain
+        revert("Unsupported chain");
+    }
+
+    /**
+     * @dev Get tick spacing for a given fee tier
+     * @param fee The fee tier (100, 500, 3000, or 10000)
+     * @return tickSpacing The corresponding tick spacing
+     */
+    function getTickSpacingForFee(uint24 fee) internal pure returns (int24) {
+        if (fee == 100) return 1;    // 0.01%
+        if (fee == 500) return 10;   // 0.05%
+        if (fee == 3000) return 60;  // 0.3%
+        if (fee == 10000) return 200; // 1%
         revert("Invalid fee tier");
     }
 
     /**
-     * @dev Approves tokens for Permit2 and then approves Universal Router via Permit2
-     * @param token The token to approve
-     * @param permit2 The Permit2 contract address
-     * @param universalRouter The Universal Router address
-     * @param amount The amount to approve
+     * @dev Creates a PoolKey for Uniswap V4
+     * @param tokenA First token address
+     * @param tokenB Second token address  
+     * @param fee Pool fee tier
+     * @param tickSpacing Tick spacing for the pool
+     * @param hooks Hooks contract address
+     * @return key The constructed PoolKey
      */
-    function approveTokensForV4(
-        address token,
-        address permit2,
-        address universalRouter,
-        uint256 amount
-    ) internal {
-        // First approve Permit2 to spend tokens
-        IERC20(token).approve(permit2, type(uint256).max);
+    function createPoolKey(
+        address tokenA,
+        address tokenB,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
+    ) internal pure returns (PoolKey memory key) {
+        // Sort tokens to ensure currency0 < currency1
+        (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         
-        // Then use Permit2 to approve Universal Router
-        IPermit2(permit2).approve(
-            token,
-            universalRouter,
-            uint160(amount),
-            uint48(block.timestamp + 1 hours)
+        key = PoolKey({
+            currency0: token0,
+            currency1: token1,
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+    }
+
+    /**
+     * @dev Creates calldata for V4 swap via Universal Router
+     * @param tokenIn Input token address
+     * @param amountIn Amount of input tokens to swap
+     * @param minAmountOut Minimum amount of output tokens expected
+     * @param fee Pool fee tier
+     * @return Actual Universal Router calldata for executing the swap
+     */
+    function createV4SwapCalldata(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint24 fee
+    ) internal view returns (bytes memory) {
+        address tokenOut = getWETHAddress(); // Always swap to WETH
+        
+        // Create pool key for the pair
+        PoolKey memory poolKey = createPoolKey(
+            tokenIn,
+            tokenOut,
+            fee,
+            getTickSpacingForFee(fee),
+            address(0) // No hooks
+        );
+
+        // Determine swap direction
+        bool zeroForOne = tokenIn == poolKey.currency0;
+
+        // Create swap parameters
+        ExactInputSingleParams memory swapParams = ExactInputSingleParams({
+            poolKey: poolKey,
+            zeroForOne: zeroForOne,
+            amountIn: uint128(amountIn),
+            amountOutMinimum: uint128(minAmountOut),
+            hookData: bytes("")
+        });
+
+        // Encode V4Router actions
+        bytes memory actions = abi.encodePacked(
+            SWAP_EXACT_IN_SINGLE,
+            SETTLE_ALL,
+            TAKE_ALL
+        );
+
+        // Encode parameters for each action
+        bytes[] memory params = new bytes[](3);
+        
+        // Swap parameters
+        params[0] = abi.encode(swapParams);
+        
+        // Settle parameters (input currency and amount)
+        params[1] = abi.encode(zeroForOne ? poolKey.currency0 : poolKey.currency1, amountIn);
+        
+        // Take parameters (output currency and minimum amount)
+        params[2] = abi.encode(zeroForOne ? poolKey.currency1 : poolKey.currency0, minAmountOut);
+
+        // Create Universal Router commands
+        bytes memory commands = abi.encodePacked(
+            PERMIT2_TRANSFER_FROM, // Transfer tokens from user
+            V4_SWAP,              // Execute V4 swap
+            UNWRAP_WETH           // Unwrap WETH to ETH if output is WETH
+        );
+
+        // Create inputs for Universal Router
+        bytes[] memory inputs = new bytes[](3);
+        
+        // Permit2 transfer input
+        inputs[0] = abi.encode(tokenIn, amountIn);
+        
+        // V4 swap input
+        inputs[1] = abi.encode(actions, params);
+        
+        // Unwrap input (amount will be determined during execution)
+        inputs[2] = abi.encode(0); // Amount set to 0, will unwrap all WETH received
+
+        // Create the final calldata for Universal Router execute function
+        uint256 deadline = block.timestamp + 300; // 5 minute deadline
+        return abi.encodeWithSignature(
+            "execute(bytes,bytes[],uint256)",
+            commands,
+            inputs,
+            deadline
         );
     }
 
     /**
-     * @dev Creates a SwapInfo struct for OriginSweeper/ExternalSweeper with V4 calldata
-     * @param token The token to swap
-     * @param amount The amount to swap
-     * @param universalRouter The Universal Router address
-     * @param fee The pool fee tier
-     * @return SwapInfo struct with V4 calldata
+     * @dev Creates SwapInfo struct
      */
-    function createV4SwapInfo(
-        address token,
-        uint256 amount,
-        address universalRouter,
-        uint24 fee
-    ) internal view returns (SwapInfo memory) {
-        bytes memory dexCalldata = createV4SwapCalldata(
-            token,
-            amount,
-            0, // No slippage protection for testing
-            fee
-        );
-
+    function createSwapInfo(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint24 fee,
+        address recipient,
+        address dexRouter
+    ) internal pure returns (SwapInfo memory) {
         return SwapInfo({
-            dexContract: universalRouter,
-            token: token,
-            amount: amount,
-            dexCalldata: dexCalldata
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            amountIn: amountIn,
+            minAmountOut: minAmountOut,
+            fee: fee,
+            recipient: recipient,
+            dexRouter: dexRouter
         });
-    }
-
-    // SwapInfo struct - matches the one in OriginSweeper/ExternalSweeper
-    struct SwapInfo {
-        address dexContract;
-        address token;
-        uint256 amount;
-        bytes dexCalldata;
     }
 } 

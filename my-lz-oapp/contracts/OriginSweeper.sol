@@ -4,6 +4,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { OApp, MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import { OAppOptionsType3 } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
+import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
@@ -13,11 +14,13 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
         All tokens are consolidated into ETH on this contract, and then transferred to one address.
  */
 contract OriginSweeper is OApp, OAppOptionsType3 {
+    using OptionsBuilder for bytes;
+
     constructor(
         address _endpoint, 
         address _delegate,
         address _finalReceiverAddress,
-        uint totalChainsSelling
+        uint _totalChainsSelling
     ) OApp(_endpoint, _delegate) Ownable(_delegate) {
         finalReceiverAddress = _finalReceiverAddress;
         totalChainsSelling = _totalChainsSelling;
@@ -31,6 +34,9 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
 
     // Address to send ETH to if privacy is not enabled
     address public finalReceiverAddress;
+
+    // Privacy flag for the current operation
+    bool public privacy;
 
     // Struct to define swap information for a token
     struct SwapInfo {
@@ -52,18 +58,19 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
      * @notice Execute token swaps across multiple chains
      * @param chainIds Array of chain IDs where tokens will be sold
      * @param swapInfoArrays Array of arrays containing swap information for each chain
-     * @param privacy Flag indicating whether to shield ETH after all swaps are complete
+     * @param _privacy Flag indicating whether to shield ETH after all swaps are complete
      */
     function executeTokenSwaps(
         uint32[] calldata chainIds,
         SwapInfo[][] calldata swapInfoArrays,
-        bool privacy
+        bool _privacy
     ) external payable {
         require(chainIds.length == swapInfoArrays.length, "Chain IDs and swap info arrays length mismatch");
         require(chainIds.length > 0, "No chains specified for swaps");
         
         totalChainsSelling = chainIds.length;
         totalChainsSentETH = 0;
+        privacy = _privacy;
         
         emit TokenSwapsInitiated(chainIds, totalChainsSelling);
 
@@ -78,7 +85,7 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
                 bytes memory payload = abi.encode(MessageType.SWAP_REQUEST, abi.encode(swapInfoArrays[i]));
                 
                 // Build options with default settings
-                bytes memory options = buildOptions(defaultOptions());
+                bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
                 
                 // Send message to the chain
                 _lzSend(
@@ -132,7 +139,7 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
     }
 
     /// @notice Receives ETH from a selling contract on a different chain
-    function receiveETH() external {
+    function receiveETH() public {
         totalChainsSentETH++;
         
         emit ETHReceived(totalChainsSentETH, totalChainsSelling);
@@ -143,7 +150,7 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
                 shieldETH();
             } else {
                 // If privacy is not enabled, send ETH to a specified address
-                payable(msg.sender).transfer(finalReceiverAddress);
+                payable(finalReceiverAddress).transfer(address(this).balance);
             }
         }
     }
@@ -169,6 +176,20 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
         
         // 3. Call the DEX contract with the provided calldata
         (bool success, bytes memory returnData) = dexContract.call(dexCalldata);
+        
+        // Check if the call was successful
+        if (!success) {
+            // Extract error message if available
+            if (returnData.length > 0) {
+                // solhint-disable-next-line no-inline-assembly
+                assembly {
+                    let returnDataSize := mload(returnData)
+                    revert(add(32, returnData), returnDataSize)
+                }
+            } else {
+                revert("DEX swap failed without message");
+            }
+        }
         
         // 4. Calculate the amount of ETH received
         amountReceived = address(this).balance - ethBalanceBefore;
@@ -203,5 +224,12 @@ contract OriginSweeper is OApp, OAppOptionsType3 {
             // Handle ETH bridged notification from another chain
             receiveETH();
         }
+    }
+
+    /**
+     * @dev Helper function to get default LayerZero options
+     */
+    function getDefaultOptions() public pure returns (bytes memory) {
+        return OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
     }
 }
